@@ -7,9 +7,7 @@
  * by Maurice Herlihy and Nir Shavit.
  * Copyright 2006 Elsevier Inc. All rights reserved.
  */
-
 package java.util.concurrent;
-
 
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -88,5 +86,6 @@ public class LockFreeHashSet<T> {
     return parent;
   }
 }
+
 
 
