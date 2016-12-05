@@ -30,7 +30,10 @@ public class BucketList<T> implements BucketSet<T> {
 	 */
 	public BucketList() {
 		this.head = new Node(0);
+		this.head.ref.incrementAndGet();
 		this.tail=new Node(Integer.MAX_VALUE);
+		this.tail.ref.incrementAndGet();
+		this.tail.ref.incrementAndGet();
 		this.head.next = new AtomicStampedReference<Node>(tail, 0);
 	}
 
@@ -61,15 +64,32 @@ public class BucketList<T> implements BucketSet<T> {
 			Node entry;
 			// is the key present?
 			if (curr.key == key) {
+				pred.ref.decrementAndGet();
+				curr.ref.decrementAndGet();
 				return false;
 			} else {
 				// splice in new entry
-				entry = new Node(key, x);
+				if( freeNode==null )
+					entry = new Node(key, x);
+				else{
+					entry=freeNode;
+					freeNode = freeNode.next.getReference();
+				}
+				
+				
+				curr.ref.incrementAndGet();
 				entry.next.set(curr, currMark);
+				entry.ref.set(1);
 				splice = pred.next.compareAndSet(curr, entry, currMark, currMark + 1);
 				if (splice){
+					curr.ref.decrementAndGet();
 					return true;
 				}
+				else{
+					entry.ref.decrementAndGet();
+				}
+				pred.ref.decrementAndGet();
+				curr.ref.decrementAndGet();
 			}
 		}
 	}
@@ -85,11 +105,17 @@ public class BucketList<T> implements BucketSet<T> {
 
 			// is the key present?
 			if (curr.key != key) {
+				pred.ref.decrementAndGet();
+				curr.ref.decrementAndGet();
 				return false;
 			} else {
 				if (pred.next.attemptStamp(curr, -1)) {
+					pred.ref.decrementAndGet();
+					curr.ref.decrementAndGet();
 					return true;
 				}
+				pred.ref.decrementAndGet();
+				curr.ref.decrementAndGet();
 			}
 		}
 	}
@@ -99,6 +125,8 @@ public class BucketList<T> implements BucketSet<T> {
 		Window window = find(head, key);
 		Node pred = window.pred;
 		Node curr = window.curr;
+		pred.ref.decrementAndGet();
+		curr.ref.decrementAndGet();
 		return (curr.key == key);
 	}
 
@@ -117,13 +145,7 @@ public class BucketList<T> implements BucketSet<T> {
 				// splice in new entry
 				Node entry = new Node(key);
 
-				entry.next.set(pred.next.getReference(), entry.next.getStamp() + 1); // TODO
-																						// :
-																						// not
-																						// sure
-																						// about
-																						// this
-																						// one
+				entry.next.set(pred.next.getReference(), entry.next.getStamp() + 1); 
 				splice = pred.next.compareAndSet(curr, entry, pred.next.getStamp(), pred.next.getStamp() + 1);
 				if (splice)
 					return new BucketList<T>(entry);
@@ -164,6 +186,7 @@ public class BucketList<T> implements BucketSet<T> {
 	private class Node {
 		public int key;
 		public T value;
+		public AtomicInteger ref = new AtomicInteger(0);
 		
 		AtomicStampedReference<Node> next;
 
@@ -181,16 +204,53 @@ public class BucketList<T> implements BucketSet<T> {
 		Node getNext() {
 			int[] cMarked = { 0 }; // is curr marked?
 			int[] sMarked = { 0 }; // is succ marked?
-			Node curr = this.next.get(cMarked);
+			Node temp = this.next.get(cMarked);
+			while(temp.ref.incrementAndGet() ==1){
+				temp = this.next.get(cMarked);
+			}
+			Node curr = temp;
+			
 			while (cMarked[0] == -1) {
-				Node succ = curr.next.get(sMarked);
-				if (this.next.compareAndSet(curr, succ, -1, sMarked[0])) {
-					curr = this.next.get(cMarked);
+				Node temp2 = curr.next.getReference();
+				if(temp2 == null || temp2.ref.incrementAndGet() == 1){
+					
+					temp = this.next.get(cMarked);
+					while(temp.ref.incrementAndGet() ==1){
+						temp = this.next.get(cMarked);
+					}
+					curr = temp;
+					
+					continue;
 				}
-				else{
-					curr = this.next.get(cMarked);
+				Node succ = temp2;
+				sMarked[0] = temp2.next.getStamp();
+				succ.ref.incrementAndGet();
+				if(this.next.compareAndSet(curr, succ, -1, sMarked[0])) {
+					curr.ref.decrementAndGet();
+					
+					if (curr.ref.decrementAndGet() == 0) {
+						curr.next.set(null, -100);
+					
+						if( freeNode!=null )
+							curr.next.set(freeNode, -100);
+						
+						freeNode=curr;
+							
+					}
+					
+				} else {
+					succ.ref.decrementAndGet();
 				}
-
+				
+				
+				Node temp3 = this.next.get(cMarked);
+				while(temp3.ref.incrementAndGet() ==1){
+					temp3 = this.next.get(cMarked);
+				}
+				curr.ref.decrementAndGet();
+				curr = temp3;
+				
+				succ.ref.decrementAndGet();
 			}
 			return curr;
 		}
@@ -207,15 +267,18 @@ public class BucketList<T> implements BucketSet<T> {
 	}
 
 	public Window find(Node head, int key) {
+		head.ref.incrementAndGet();
 		Node pred = head;
 		Node curr = head.getNext();
-		Node temp;
 		while (curr.key < key) {
-			temp =pred;
+			curr.ref.incrementAndGet();
+			pred.ref.decrementAndGet();
 			pred = curr;
-			temp=curr;
-			curr = pred.getNext();
+			
+			curr = curr.getNext();
+			pred.ref.decrementAndGet();
 		}
 		return new Window(pred, curr);
 	}
 }
+
